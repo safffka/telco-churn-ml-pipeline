@@ -1,0 +1,49 @@
+project:
+  experiment_name: telco-churn-catboost
+  seed: 42
+
+data:
+  features_path: data/processed/features.parquet
+  id_col: customerID
+  target_col: Churn
+
+split:
+  test_size: 0.2
+
+model:
+  params:
+    iterations: 500
+    depth: 6
+    learning_rate: 0.05
+    loss_function: Logloss
+    eval_metric: AUC
+    verbose: 100
+
+  categorical_cols:
+    - gender
+    - SeniorCitizen
+    - Partner
+    - Dependents
+    - PhoneService
+    - MultipleLines
+    - InternetService
+    - OnlineSecurity
+    - OnlineBackup
+    - DeviceProtection
+    - TechSupport
+    - StreamingTV
+    - StreamingMovies
+    - Contract
+    - PaperlessBilling
+    - PaymentMethod
+    - is_long_contract
+    - has_fiber
+
+
+quality_gate:
+  min_roc_auc: 0.75
+
+paths:
+  model_path: models/model.cbm
+  reports_dir: reports
+  mlruns_dir: mlruns

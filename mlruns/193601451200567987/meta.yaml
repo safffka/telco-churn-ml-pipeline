@@ -1,6 +1,0 @@
-artifact_location: file:///app/mlruns/193601451200567987
-creation_time: 1768894957532
-experiment_id: '193601451200567987'
-last_update_time: 1768894957532
-lifecycle_stage: active
-name: telco-churn-catboost

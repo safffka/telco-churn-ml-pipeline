@@ -1,0 +1,22 @@
+# ===== ML artifacts =====
+mlruns/
+models/*.cbm
+catboost_info/
+
+# ===== Data artifacts =====
+data/monitoring/*.parquet
+
+# ===== Reports =====
+reports/*.html
+reports/*.png
+reports/*.json
+reports/*.md
+
+# ===== Python =====
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ===== OS =====
+.DS_Store

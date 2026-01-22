@@ -1,7 +1,0 @@
-{
-  "roc_auc": 0.8389626289660458,
-  "quality_gate": {
-    "threshold": 0.75,
-    "passed": true
-  }
-}

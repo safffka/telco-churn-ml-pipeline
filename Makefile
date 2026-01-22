@@ -15,3 +15,8 @@ all:
 	make train
 	make evaluate
 	make report
+test:
+	PYTHONPATH=/app pytest -q
+
+monitor:
+	python -m src.monitor

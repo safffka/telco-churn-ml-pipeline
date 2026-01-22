@@ -2,9 +2,9 @@
 import json
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import pandas as pd
 import mlflow
+import matplotlib.pyplot as plt
 
 from catboost import CatBoostClassifier
 from sklearn.model_selection import train_test_split
@@ -16,44 +16,36 @@ from sklearn.metrics import (
 )
 
 from src.utils import setup_mlflow
-
-# ================= paths =================
-FEATURES_PATH = Path("data/processed/features.parquet")
-MODEL_PATH = Path("models/model.cbm")
-
-REPORTS_DIR = Path("reports")
-METRICS_PATH = REPORTS_DIR / "metrics.json"
-ROC_PATH = REPORTS_DIR / "roc_curve.png"
-CM_PATH = REPORTS_DIR / "confusion_matrix.png"
-
-# ================= config =================
-TARGET_COL = "Churn"
-ID_COL = "customerID"
-
-MIN_ROC_AUC = 0.75
-EXPERIMENT_NAME = "telco-churn-catboost"
-
-# ========================================
+from src.config import load_config, cfg_get
 
 
-def load_artifacts():
-    df = pd.read_parquet(FEATURES_PATH)
+def load_artifacts(cfg):
+    features_path = Path(cfg_get(cfg, "data", "features_path"))
+    model_path = Path(cfg_get(cfg, "paths", "model_path"))
+
+    df = pd.read_parquet(features_path)
 
     model = CatBoostClassifier()
-    model.load_model(MODEL_PATH)
+    model.load_model(model_path)
 
     return df, model
 
 
-def validate(df: pd.DataFrame, model: CatBoostClassifier):
-    X = df.drop(columns=[TARGET_COL, ID_COL])
-    y = df[TARGET_COL]
+def validate(df: pd.DataFrame, model: CatBoostClassifier, cfg):
+    target_col = cfg_get(cfg, "data", "target_col")
+    id_col = cfg_get(cfg, "data", "id_col")
+
+    test_size = cfg_get(cfg, "split", "test_size")
+    seed = cfg_get(cfg, "project", "seed")
+
+    X = df.drop(columns=[target_col, id_col])
+    y = df[target_col]
 
     _, X_val, _, y_val = train_test_split(
         X,
         y,
-        test_size=0.2,
-        random_state=42,
+        test_size=test_size,
+        random_state=seed,
         stratify=y,
     )
 
@@ -65,7 +57,7 @@ def validate(df: pd.DataFrame, model: CatBoostClassifier):
     return y_val, y_pred, y_proba, roc_auc
 
 
-def plot_roc(y_true, y_proba):
+def plot_roc(y_true, y_proba, out_path: Path):
     fpr, tpr, _ = roc_curve(y_true, y_proba)
 
     plt.figure()
@@ -75,69 +67,81 @@ def plot_roc(y_true, y_proba):
     plt.ylabel("True Positive Rate")
     plt.title("ROC Curve")
 
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    plt.savefig(ROC_PATH, bbox_inches="tight")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(out_path, bbox_inches="tight")
     plt.close()
 
 
-def plot_confusion_matrix(y_true, y_pred):
+def plot_confusion_matrix(y_true, y_pred, out_path: Path):
     cm = confusion_matrix(y_true, y_pred)
 
     disp = ConfusionMatrixDisplay(cm)
     disp.plot()
     plt.title("Confusion Matrix")
 
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    plt.savefig(CM_PATH, bbox_inches="tight")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(out_path, bbox_inches="tight")
     plt.close()
 
 
-def save_metrics(roc_auc: float):
+def save_metrics(roc_auc: float, passed: bool, cfg) -> dict:
+    reports_dir = Path(cfg_get(cfg, "paths", "reports_dir"))
+    metrics_path = reports_dir / "metrics.json"
+
+    min_roc_auc = cfg_get(cfg, "quality_gate", "min_roc_auc")
+
     metrics = {
         "roc_auc": float(roc_auc),
         "quality_gate": {
-            "threshold": float(MIN_ROC_AUC),
-            "passed": bool(roc_auc >= MIN_ROC_AUC),
+            "threshold": float(min_roc_auc),
+            "passed": bool(passed),
         },
     }
 
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    with open(METRICS_PATH, "w") as f:
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2)
 
     return metrics
 
 
 def main():
-    setup_mlflow(EXPERIMENT_NAME)
+    cfg = load_config()
 
-    df, model = load_artifacts()
-    y_val, y_pred, y_proba, roc_auc = validate(df, model)
+    experiment_name = cfg_get(cfg, "project", "experiment_name")
+    setup_mlflow(experiment_name)
 
-    plot_roc(y_val, y_proba)
-    plot_confusion_matrix(y_val, y_pred)
+    reports_dir = Path(cfg_get(cfg, "paths", "reports_dir"))
+    roc_path = reports_dir / "roc_curve.png"
+    cm_path = reports_dir / "confusion_matrix.png"
 
-    metrics = save_metrics(roc_auc)
+    min_roc_auc = cfg_get(cfg, "quality_gate", "min_roc_auc")
+
+    df, model = load_artifacts(cfg)
+    y_val, y_pred, y_proba, roc_auc = validate(df, model, cfg)
+
+    plot_roc(y_val, y_proba, roc_path)
+    plot_confusion_matrix(y_val, y_pred, cm_path)
+
+    passed = roc_auc >= min_roc_auc
+    metrics = save_metrics(roc_auc, passed, cfg)
 
     # ===== MLflow logging =====
-    with mlflow.start_run(run_name="validation"):
+    with mlflow.start_run(run_name="evaluate"):
         mlflow.log_metric("roc_auc", float(roc_auc))
-        mlflow.log_param("quality_gate_threshold", MIN_ROC_AUC)
-        mlflow.log_param(
-            "quality_gate_passed",
-            bool(roc_auc >= MIN_ROC_AUC),
-        )
+        mlflow.log_param("quality_gate_threshold", float(min_roc_auc))
+        mlflow.log_param("quality_gate_passed", bool(passed))
 
-        mlflow.log_artifact(ROC_PATH)
-        mlflow.log_artifact(CM_PATH)
-        mlflow.log_artifact(METRICS_PATH)
+        mlflow.log_artifact(roc_path)
+        mlflow.log_artifact(cm_path)
+        mlflow.log_artifact(reports_dir / "metrics.json")
 
     print(metrics)
 
-    # ===== quality gate =====
-    if roc_auc < MIN_ROC_AUC:
+    # ===== hard quality gate =====
+    if not passed:
         raise RuntimeError(
-            f"Quality gate failed: ROC-AUC {roc_auc:.3f} < {MIN_ROC_AUC}"
+            f"Quality gate failed: ROC-AUC {roc_auc:.3f} < {min_roc_auc}"
         )
 
 
